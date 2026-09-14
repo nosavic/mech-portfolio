@@ -404,6 +404,36 @@
     }
     .viewer-hint.show { opacity: 1; }
 
+    /* Model switcher strip */
+    .viewer-switcher {
+      position: absolute;
+      bottom: 14px; left: 14px;
+      display: flex;
+      gap: 5px;
+      z-index: 4;
+      opacity: 0;
+      transition: opacity 0.4s ease 0.5s;
+    }
+    .viewer-switcher.show { opacity: 1; }
+    .vs-btn {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      background: rgba(255,255,255,0.88);
+      border: 1px solid rgba(0,87,200,0.16);
+      border-radius: 100px;
+      padding: 4px 11px;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      line-height: 1;
+    }
+    .vs-btn:hover { background: rgba(0,87,200,0.08); color: var(--accent); border-color: rgba(0,87,200,0.3); }
+    .vs-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
     /* View toolbar */
     .viewer-toolbar {
       position: absolute;
@@ -866,6 +896,12 @@
         </div>
         <span class="viewer-badge">Interactive 3D · Fusion 360</span>
         <span class="viewer-hint" id="kiosk-hint">Drag to rotate</span>
+        <div class="viewer-switcher" id="kiosk-switcher">
+          <button class="vs-btn active" data-idx="0">1 Hopper</button>
+          <button class="vs-btn" data-idx="1">2 Hopper</button>
+          <button class="vs-btn" data-idx="2">3 Hopper</button>
+          <button class="vs-btn" data-idx="3">4 Hopper</button>
+        </div>
         <div class="viewer-toolbar" id="kiosk-toolbar">
           <div class="vt-group">
             <button class="vt-btn active" data-view="iso">Isometric</button>
@@ -878,7 +914,7 @@
       </div>
       <div class="featured-info">
         <div>
-          <h3 class="featured-name">Multi-Hopper Kiosk System</h3>
+          <h3 class="featured-name" id="kiosk-model-title">Single-Hopper Kiosk (Brandy)</h3>
           <p class="featured-desc">Lead design for a family of self-service hardware kiosks spanning single- to four-hopper configurations. Full sheet-metal cabinet design, hopper bays, internal component-mounting structures and fabrication package — DXF, CNC bending data, flat patterns and BOMs.</p>
         </div>
         <div class="featured-meta">
@@ -1227,12 +1263,26 @@
 
 /* ── KIOSK 3D VIEWER ── */
 (function () {
-  var canvas   = document.getElementById('kiosk-viewer');
-  var loading  = document.getElementById('kiosk-loading');
-  var hint     = document.getElementById('kiosk-hint');
-  var toolbar  = document.getElementById('kiosk-toolbar');
+  var canvas    = document.getElementById('kiosk-viewer');
+  var loading   = document.getElementById('kiosk-loading');
+  var loadTxt   = loading.querySelector('.viewer-loading-text');
+  var hint      = document.getElementById('kiosk-hint');
+  var toolbar   = document.getElementById('kiosk-toolbar');
+  var switcher  = document.getElementById('kiosk-switcher');
+  var titleEl   = document.getElementById('kiosk-model-title');
   if (!canvas || !window.THREE) return;
   var THREE = window.THREE;
+
+  /* ── Model catalogue ── */
+  var MODELS = [
+    { file: 'models/kiosk-brandy.obj', label: 'Single-Hopper Kiosk (Brandy)' },
+    { file: 'models/kiosk-two.obj',    label: 'Dual-Hopper Kiosk'            },
+    { file: 'models/kiosk-three.obj',  label: 'Three-Hopper Kiosk'           },
+    { file: 'models/kiosk-four.obj',   label: 'Four-Hopper Kiosk'            },
+  ];
+  var currentIdx   = 0;
+  var currentGroup = null;
+  var isLoading    = false;
 
   var wrap = canvas.parentElement;
   var W = wrap.clientWidth, H = wrap.clientHeight;
@@ -1250,159 +1300,175 @@
   scene.background = new THREE.Color(0xf0f3f8);
   var camera = new THREE.PerspectiveCamera(38, W / H, 0.01, 5000);
 
-  /* Lighting — SolidWorks studio style */
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
   var key = new THREE.DirectionalLight(0xffffff, 1.1);
-  key.position.set(5, 10, 7);
-  key.castShadow = true;
+  key.position.set(5, 10, 7); key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
   scene.add(key);
   var fill = new THREE.DirectionalLight(0xe8eeff, 0.4);
-  fill.position.set(-6, 4, -3);
-  scene.add(fill);
+  fill.position.set(-6, 4, -3); scene.add(fill);
   var top3 = new THREE.DirectionalLight(0xffffff, 0.2);
-  top3.position.set(0, 10, 0);
-  scene.add(top3);
+  top3.position.set(0, 10, 0); scene.add(top3);
 
-  /* Ground shadow plane — repositioned after model loads */
   var ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.ShadowMaterial({ opacity: 0.10 }));
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   scene.add(ground);
 
   var controls = new THREE.OrbitControls(camera, canvas);
-  controls.enableDamping  = true;
-  controls.dampingFactor  = 0.08;
-  controls.autoRotate     = true;
-  controls.autoRotateSpeed = 0.55;
-  controls.enablePan      = false;
-  controls.enableZoom     = false;
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.autoRotate = true;   controls.autoRotateSpeed = 0.55;
+  controls.enablePan = false;   controls.enableZoom = false;
 
-  /* ── View preset definitions (relative to dist, in Y-up space) ── */
   var VIEWS = {
-    iso:   { x:  0.65, y:  0.45, z:  0.75 },  // SW default isometric: FRONT+RIGHT+TOP
-    front: { x:  0,    y:  0.05, z:  1    },
-    right: { x:  1,    y:  0.05, z:  0    },
-    back:  { x:  0,    y:  0.05, z: -1    },
-    top:   { x:  0.01, y:  1,    z:  0.01 },
+    iso:   { x: 0.65, y: 0.45, z: 0.75 },
+    front: { x: 0,    y: 0.05, z: 1    },
+    right: { x: 1,    y: 0.05, z: 0    },
+    back:  { x: 0,    y: 0.05, z: -1   },
+    top:   { x: 0.01, y: 1,    z: 0.01 },
   };
-  var dist = 100; // updated after model loads
+  var dist = 100;
+  var tweenTo    = null;
+  var activeView = 'iso';
+  var mat = new THREE.MeshStandardMaterial({ color: 0x8a9198, metalness: 0.08, roughness: 0.55 });
 
-  var tweenTo       = null;
-  var isInteracting = false;
-  var activeView    = 'iso';
+  /* ── Helpers ── */
+  function disposeGroup(grp) {
+    if (!grp) return;
+    grp.traverse(function (child) {
+      if (child.isMesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) child.material.forEach(function(m){ m.dispose(); });
+        else child.material.dispose();
+      }
+    });
+    scene.remove(grp);
+  }
 
-  function animateTo(pos, target, viewKey) {
-    tweenTo = { pos: pos.clone(), target: target ? target.clone() : new THREE.Vector3() };
-    controls.enabled = false;
-    controls.autoRotate = false;
-    if (viewKey) {
-      activeView = viewKey;
-      toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){
-        b.classList.toggle('active', b.dataset.view === viewKey);
-      });
+  function setCamera(maxD) {
+    dist = (maxD / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.6;
+    controls.minDistance = maxD * 0.35;
+    controls.maxDistance = maxD * 5;
+    var iv = VIEWS.iso;
+    var n  = Math.sqrt(iv.x*iv.x + iv.y*iv.y + iv.z*iv.z);
+    camera.position.set(iv.x/n*dist, iv.y/n*dist, iv.z/n*dist);
+    camera.lookAt(0, 0, 0);
+    controls.target.set(0, 0, 0);
+    controls.autoRotate = true;
+    activeView = 'iso';
+    toolbar && toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){
+      b.classList.toggle('active', b.dataset.view === 'iso');
+    });
+    controls.update();
+  }
+
+  function showLoading(on) {
+    if (on) {
+      loading.classList.remove('done');
+      loadTxt.textContent = 'Loading 3D Model';
+    } else {
+      loading.classList.add('done');
     }
   }
 
+  /* ── Load a model by index ── */
+  function loadModel(idx) {
+    if (isLoading) return;
+    isLoading = true;
+    showLoading(true);
+    controls.autoRotate = false;
+
+    var info = MODELS[idx];
+    var loader = new THREE.OBJLoader();
+    loader.load(
+      info.file,
+      function (obj) {
+        disposeGroup(currentGroup);
+        obj.rotation.x = -Math.PI / 2;
+        obj.traverse(function (child) {
+          if (!child.isMesh) return;
+          child.material = mat;
+          child.castShadow = true;
+          child.receiveShadow = true;
+        });
+        obj.updateMatrixWorld(true);
+        var box  = new THREE.Box3().setFromObject(obj);
+        var ctr  = box.getCenter(new THREE.Vector3());
+        var size = box.getSize(new THREE.Vector3());
+        var maxD = Math.max(size.x, size.y, size.z);
+        obj.position.set(-ctr.x, -ctr.y, -ctr.z);
+        scene.add(obj);
+        currentGroup = obj;
+
+        box.setFromObject(obj);
+        ground.position.y = box.min.y - 0.01;
+        key.shadow.camera.left   = -maxD * 2; key.shadow.camera.right  = maxD * 2;
+        key.shadow.camera.top    =  maxD * 2; key.shadow.camera.bottom = -maxD * 2;
+        key.shadow.camera.far    =  maxD * 10;
+        key.shadow.camera.updateProjectionMatrix();
+
+        setCamera(maxD);
+        if (titleEl) titleEl.textContent = info.label;
+
+        /* Update switcher active state */
+        switcher && switcher.querySelectorAll('.vs-btn').forEach(function(b){
+          b.classList.toggle('active', parseInt(b.dataset.idx) === idx);
+        });
+
+        currentIdx = idx;
+        isLoading  = false;
+        showLoading(false);
+        hint.classList.add('show');
+        toolbar.classList.add('show');
+        switcher.classList.add('show');
+      },
+      function (xhr) {
+        loadTxt.textContent = xhr.total
+          ? 'Loading — ' + Math.round((xhr.loaded / xhr.total) * 100) + '%'
+          : 'Loading — ' + (xhr.loaded / 1048576).toFixed(1) + ' MB';
+      },
+      function (err) { console.error('OBJ error:', err); isLoading = false; }
+    );
+  }
+
+  /* ── View toolbar ── */
   function goView(key) {
-    var v = VIEWS[key];
-    if (!v) return;
+    var v = VIEWS[key]; if (!v) return;
     var norm = Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
-    var pos = new THREE.Vector3(v.x/norm * dist, v.y/norm * dist, v.z/norm * dist);
-    animateTo(pos, new THREE.Vector3(), key);
+    var pos  = new THREE.Vector3(v.x/norm*dist, v.y/norm*dist, v.z/norm*dist);
+    tweenTo = { pos: pos, target: new THREE.Vector3() };
+    controls.enabled = false; controls.autoRotate = false;
+    activeView = key;
+    toolbar && toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){
+      b.classList.toggle('active', b.dataset.view === key);
+    });
   }
 
   canvas.addEventListener('pointerdown', function () {
-    isInteracting = true; tweenTo = null;
-    controls.enabled = true; controls.autoRotate = false;
-    toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){ b.classList.remove('active'); });
+    tweenTo = null; controls.enabled = true; controls.autoRotate = false;
+    toolbar && toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){ b.classList.remove('active'); });
   });
-  canvas.addEventListener('pointerup', function () { isInteracting = false; });
 
   toolbar && toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function (btn) {
     btn.addEventListener('click', function () { goView(btn.dataset.view); });
   });
 
-  /* Material — SolidWorks warm grey + edge lines */
-  var mat = new THREE.MeshStandardMaterial({ color: 0x8a9198, metalness: 0.08, roughness: 0.55 });
+  switcher && switcher.querySelectorAll('.vs-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var idx = parseInt(btn.dataset.idx);
+      if (idx !== currentIdx) loadModel(idx);
+    });
+  });
 
-  var loader = new THREE.OBJLoader();
-  loader.load(
-    'models/kiosk-brandy.obj',
-    function (obj) {
-      /* ── Z-up → Y-up correction (SolidWorks exports in Z-up) ── */
-      obj.rotation.x = -Math.PI / 2;
-
-      obj.traverse(function (child) {
-        if (!child.isMesh) return;
-        child.material = mat;
-        child.castShadow = true;
-        child.receiveShadow = true;
-      });
-
-      /* Centre model at origin */
-      obj.updateMatrixWorld(true);
-      var box  = new THREE.Box3().setFromObject(obj);
-      var ctr  = box.getCenter(new THREE.Vector3());
-      var size = box.getSize(new THREE.Vector3());
-      var maxD = Math.max(size.x, size.y, size.z);
-
-      /* Offset so model sits centred */
-      obj.position.set(-ctr.x, -ctr.y, -ctr.z);
-      scene.add(obj);
-
-      /* Recompute box after offset */
-      box.setFromObject(obj);
-      ground.position.y = box.min.y - 0.01;
-
-      key.shadow.camera.left   = -maxD * 2;
-      key.shadow.camera.right  =  maxD * 2;
-      key.shadow.camera.top    =  maxD * 2;
-      key.shadow.camera.bottom = -maxD * 2;
-      key.shadow.camera.far    = maxD * 10;
-      key.shadow.camera.updateProjectionMatrix();
-
-      dist = (maxD / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.6;
-      controls.minDistance = maxD * 0.35;
-      controls.maxDistance = maxD * 5;
-
-      /* Set default isometric view */
-      var iv = VIEWS.iso;
-      var n  = Math.sqrt(iv.x*iv.x + iv.y*iv.y + iv.z*iv.z);
-      camera.position.set(iv.x/n*dist, iv.y/n*dist, iv.z/n*dist);
-      camera.lookAt(0, 0, 0);
-      controls.target.set(0, 0, 0);
-      controls.update();
-
-      loading.classList.add('done');
-      hint.classList.add('show');
-      toolbar.classList.add('show');
-      requestAnimationFrame(tick);
-    },
-    function (xhr) {
-      var txt = loading.querySelector('.viewer-loading-text');
-      if (!txt) return;
-      txt.textContent = xhr.total
-        ? 'Loading — ' + Math.round((xhr.loaded / xhr.total) * 100) + '%'
-        : 'Loading — ' + (xhr.loaded / 1048576).toFixed(1) + ' MB';
-    },
-    function (err) { console.error('OBJ load error:', err); }
-  );
-
+  /* ── Render loop ── */
   function tick() {
     requestAnimationFrame(tick);
-
     if (tweenTo) {
       camera.position.lerp(tweenTo.pos, 0.06);
       controls.target.lerp(tweenTo.target, 0.06);
       camera.lookAt(controls.target);
-
-      var posClose    = camera.position.distanceTo(tweenTo.pos) < 0.005;
-      var targetClose = controls.target.distanceTo(tweenTo.target) < 0.005;
-      if (posClose && targetClose) {
+      if (camera.position.distanceTo(tweenTo.pos) < 0.005) {
         camera.position.copy(tweenTo.pos);
         controls.target.copy(tweenTo.target);
-        camera.lookAt(controls.target);
         tweenTo = null;
         controls.enabled = true;
         controls.autoRotate = (activeView === 'iso');
@@ -1411,17 +1477,19 @@
     } else {
       controls.update();
     }
-
     renderer.render(scene, camera);
   }
 
   window.addEventListener('resize', function () {
     var w = wrap.clientWidth, h = wrap.clientHeight;
     if (!w || !h) return;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    camera.aspect = w / h; camera.updateProjectionMatrix();
     renderer.setSize(w, h);
   }, { passive: true });
+
+  /* ── Boot ── */
+  loadModel(0);
+  tick();
 })();
 </script>
 
