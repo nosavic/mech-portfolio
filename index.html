@@ -348,7 +348,7 @@
       display: flex; align-items: center; justify-content: center;
       flex-direction: column; gap: 12px;
       z-index: 2;
-      background: #f2f5fb;
+      background: #edf1f7;
       background-image:
         linear-gradient(rgba(0, 87, 200, 0.04) 1px, transparent 1px),
         linear-gradient(90deg, rgba(0, 87, 200, 0.04) 1px, transparent 1px);
@@ -1290,27 +1290,54 @@
   var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(W, H);
-  renderer.setClearColor(0xf0f3f8, 1);
   renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.toneMapping = THREE.LinearToneMapping;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   var scene  = new THREE.Scene();
-  scene.background = new THREE.Color(0xf0f3f8);
+  scene.background = new THREE.Color(0xedf1f7);
   var camera = new THREE.PerspectiveCamera(38, W / H, 0.01, 5000);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-  var key = new THREE.DirectionalLight(0xffffff, 1.1);
-  key.position.set(5, 10, 7); key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  scene.add(key);
-  var fill = new THREE.DirectionalLight(0xe8eeff, 0.4);
-  fill.position.set(-6, 4, -3); scene.add(fill);
-  var top3 = new THREE.DirectionalLight(0xffffff, 0.2);
-  top3.position.set(0, 10, 0); scene.add(top3);
+  /* ── Studio env map for realistic reflections ── */
+  var pmrem = new THREE.PMREMGenerator(renderer);
+  var envScn = new THREE.Scene();
+  /* Sky dome — light blue-white top, warm grey bottom */
+  var domeMat = new THREE.MeshBasicMaterial({ side: THREE.BackSide });
+  domeMat.color.set(0xc8d8ee);
+  envScn.add(new THREE.Mesh(new THREE.SphereGeometry(50, 16, 8), domeMat));
+  /* A bright spot to create a visible highlight direction */
+  var eKey = new THREE.DirectionalLight(0xfffaf0, 4);
+  eKey.position.set(3, 8, 5);
+  envScn.add(eKey);
+  var eFill = new THREE.DirectionalLight(0xd0d8ff, 1.5);
+  eFill.position.set(-4, 2, -3);
+  envScn.add(eFill);
+  var envMap = pmrem.fromScene(envScn).texture;
+  scene.environment = envMap;
+  pmrem.dispose();
 
-  var ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.ShadowMaterial({ opacity: 0.10 }));
+  /* ── Hemisphere (sky/ground) + directional rig ── */
+  /* HemisphereLight: top colour = sky, bottom = warm floor bounce */
+  scene.add(new THREE.HemisphereLight(0xc8daf8, 0x806040, 0.65));
+
+  /* Key — strong, slightly warm, from top-right-front */
+  var key = new THREE.DirectionalLight(0xfff6e8, 1.4);
+  key.position.set(6, 12, 8); key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.bias = -0.0003;
+  scene.add(key);
+
+  /* Fill — cool, from left */
+  var fill = new THREE.DirectionalLight(0xddeeff, 0.4);
+  fill.position.set(-8, 4, 2); scene.add(fill);
+
+  /* Rim — blue accent from behind/below, creates edge separation */
+  var rim = new THREE.DirectionalLight(0x6090d0, 0.55);
+  rim.position.set(-2, 6, -10); scene.add(rim);
+
+  var ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.ShadowMaterial({ opacity: 0.14 }));
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   scene.add(ground);
 
@@ -1329,7 +1356,14 @@
   var dist = 100;
   var tweenTo    = null;
   var activeView = 'iso';
-  var mat = new THREE.MeshStandardMaterial({ color: 0x8a9198, metalness: 0.08, roughness: 0.55 });
+
+  /* Powder-coated steel — dark charcoal, slight sheen, env reflections */
+  var mat = new THREE.MeshStandardMaterial({
+    color: 0x3a4455,
+    metalness: 0.12,
+    roughness: 0.70,
+    envMapIntensity: 0.9,
+  });
 
   /* ── Helpers ── */
   function disposeGroup(grp) {
