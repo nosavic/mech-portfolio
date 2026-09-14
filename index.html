@@ -830,7 +830,7 @@
           <span class="viewer-loading-text">Loading 3D Model</span>
         </div>
         <span class="viewer-badge">Interactive 3D · Fusion 360</span>
-        <span class="viewer-hint" id="kiosk-hint">Drag to rotate · Scroll to zoom</span>
+        <span class="viewer-hint" id="kiosk-hint">Drag to rotate</span>
       </div>
       <div class="featured-info">
         <div>
@@ -1218,13 +1218,30 @@
   scene.add(rim);
 
   var controls = new THREE.OrbitControls(camera, canvas);
-  controls.enableDamping = true; controls.dampingFactor = 0.06;
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
   controls.autoRotate = true; controls.autoRotateSpeed = 0.6;
   controls.enablePan = false;
+  controls.enableZoom = false; // scroll passes through to page
 
-  var idleTimer;
-  canvas.addEventListener('pointerdown', function () { controls.autoRotate = false; clearTimeout(idleTimer); });
-  canvas.addEventListener('pointerup', function () { idleTimer = setTimeout(function () { controls.autoRotate = true; }, 3000); });
+  /* Home state — filled once model loads */
+  var homePos = new THREE.Vector3();
+  var homeTarget = new THREE.Vector3();
+  var returning = false;
+  var isInteracting = false;
+  var idleTimer = null;
+
+  function scheduleReturn() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(function () { if (!isInteracting) returning = true; }, 2200);
+  }
+
+  canvas.addEventListener('pointerdown', function () {
+    isInteracting = true; returning = false;
+    controls.enabled = true; controls.autoRotate = false;
+    clearTimeout(idleTimer);
+  });
+  canvas.addEventListener('pointerup', function () { isInteracting = false; scheduleReturn(); });
+  canvas.addEventListener('pointerleave', function () { if (!isInteracting) scheduleReturn(); });
 
   /* Steel material — dark blue-grey reads well on light bg */
   var mat = new THREE.MeshStandardMaterial({ color: 0x3a5070, metalness: 0.75, roughness: 0.25 });
@@ -1251,6 +1268,10 @@
       controls.maxDistance = maxD * 6;
       controls.update();
 
+      // Save home state for snap-back
+      homePos.copy(camera.position);
+      homeTarget.copy(controls.target);
+
       loading.classList.add('done');
       hint.classList.add('show');
       requestAnimationFrame(tick);
@@ -1269,7 +1290,27 @@
 
   function tick() {
     requestAnimationFrame(tick);
-    controls.update();
+
+    if (returning) {
+      // Smoothly lerp camera and target back to home
+      controls.enabled = false;
+      camera.position.lerp(homePos, 0.045);
+      controls.target.lerp(homeTarget, 0.045);
+      camera.lookAt(controls.target);
+
+      if (camera.position.distanceTo(homePos) < 0.005 && controls.target.distanceTo(homeTarget) < 0.005) {
+        camera.position.copy(homePos);
+        controls.target.copy(homeTarget);
+        camera.lookAt(homeTarget);
+        returning = false;
+        controls.enabled = true;
+        controls.autoRotate = true;
+        controls.update();
+      }
+    } else {
+      controls.update();
+    }
+
     renderer.render(scene, camera);
   }
 
