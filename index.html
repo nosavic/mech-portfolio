@@ -404,6 +404,41 @@
     }
     .viewer-hint.show { opacity: 1; }
 
+    /* View toolbar */
+    .viewer-toolbar {
+      position: absolute;
+      top: 12px; right: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 4;
+      opacity: 0;
+      transition: opacity 0.4s ease 0.5s;
+    }
+    .viewer-toolbar.show { opacity: 1; }
+    .vt-group { display: flex; flex-direction: column; gap: 3px; }
+    .vt-sep { height: 1px; background: rgba(0,87,200,0.12); margin: 2px 0; }
+    .vt-btn {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      background: rgba(255,255,255,0.88);
+      border: 1px solid rgba(0,87,200,0.16);
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      text-align: center;
+      line-height: 1;
+    }
+    .vt-btn:hover { background: rgba(0,87,200,0.08); color: var(--accent); border-color: rgba(0,87,200,0.35); }
+    .vt-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .vt-btn-home { color: var(--accent); border-color: rgba(0,87,200,0.3); font-weight: 600; }
+
     .featured-info {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -831,6 +866,17 @@
         </div>
         <span class="viewer-badge">Interactive 3D · Fusion 360</span>
         <span class="viewer-hint" id="kiosk-hint">Drag to rotate</span>
+        <div class="viewer-toolbar" id="kiosk-toolbar">
+          <div class="vt-group">
+            <button class="vt-btn active" data-view="iso">Isometric</button>
+            <button class="vt-btn" data-view="front">Front</button>
+            <button class="vt-btn" data-view="right">Right</button>
+            <button class="vt-btn" data-view="top">Top</button>
+            <button class="vt-btn" data-view="back">Back</button>
+          </div>
+          <div class="vt-sep"></div>
+          <button class="vt-btn vt-btn-home" id="kiosk-set-home">Set Home</button>
+        </div>
       </div>
       <div class="featured-info">
         <div>
@@ -1183,22 +1229,23 @@
 
 /* ── KIOSK 3D VIEWER ── */
 (function () {
-  var canvas  = document.getElementById('kiosk-viewer');
-  var loading = document.getElementById('kiosk-loading');
-  var hint    = document.getElementById('kiosk-hint');
+  var canvas   = document.getElementById('kiosk-viewer');
+  var loading  = document.getElementById('kiosk-loading');
+  var hint     = document.getElementById('kiosk-hint');
+  var toolbar  = document.getElementById('kiosk-toolbar');
+  var setHomeBtn = document.getElementById('kiosk-set-home');
   if (!canvas || !window.THREE) return;
   var THREE = window.THREE;
 
   var wrap = canvas.parentElement;
   var W = wrap.clientWidth, H = wrap.clientHeight;
 
-  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false });
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(W, H);
   renderer.setClearColor(0xf0f3f8, 1);
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.LinearToneMapping;
-  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -1206,115 +1253,164 @@
   scene.background = new THREE.Color(0xf0f3f8);
   var camera = new THREE.PerspectiveCamera(38, W / H, 0.01, 5000);
 
-  /* Lighting matched to SolidWorks default studio look */
+  /* Lighting — SolidWorks studio style */
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
   var key = new THREE.DirectionalLight(0xffffff, 1.1);
   key.position.set(5, 10, 7);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.near = 0.5;
-  key.shadow.camera.far = 5000;
   scene.add(key);
   var fill = new THREE.DirectionalLight(0xe8eeff, 0.4);
   fill.position.set(-6, 4, -3);
   scene.add(fill);
-  var top = new THREE.DirectionalLight(0xffffff, 0.25);
-  top.position.set(0, 10, 0);
-  scene.add(top);
+  scene.add(Object.assign(new THREE.DirectionalLight(0xffffff, 0.2), { position: new THREE.Vector3(0,10,0) }));
 
-  /* Ground plane for shadow */
-  var groundMat = new THREE.ShadowMaterial({ opacity: 0.12 });
-  var ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), groundMat);
+  /* Ground shadow plane — repositioned after model loads */
+  var ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.ShadowMaterial({ opacity: 0.10 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
   var controls = new THREE.OrbitControls(camera, canvas);
-  controls.enableDamping = true; controls.dampingFactor = 0.08;
-  controls.autoRotate = true; controls.autoRotateSpeed = 0.6;
-  controls.enablePan = false;
-  controls.enableZoom = false; // scroll passes through to page
+  controls.enableDamping  = true;
+  controls.dampingFactor  = 0.08;
+  controls.autoRotate     = true;
+  controls.autoRotateSpeed = 0.55;
+  controls.enablePan      = false;
+  controls.enableZoom     = false;
 
-  /* Home state — filled once model loads */
-  var homePos = new THREE.Vector3();
+  /* ── View preset definitions (relative to dist, in Y-up space) ── */
+  var VIEWS = {
+    iso:   { x:  0.65, y:  0.45, z:  0.75 },  // SW default isometric: FRONT+RIGHT+TOP
+    front: { x:  0,    y:  0.05, z:  1    },
+    right: { x:  1,    y:  0.05, z:  0    },
+    back:  { x:  0,    y:  0.05, z: -1    },
+    top:   { x:  0.01, y:  1,    z:  0.01 },
+  };
+  var dist = 100; // updated after model loads
+
+  /* Home pos stored as the current active view on load */
+  var homePos    = new THREE.Vector3();
   var homeTarget = new THREE.Vector3();
-  var returning = false;
+  var tweenTo    = null; // { pos, target } while animating
   var isInteracting = false;
   var idleTimer = null;
+  var activeView = 'iso';
+
+  function animateTo(pos, target, viewKey) {
+    tweenTo = { pos: pos.clone(), target: target ? target.clone() : new THREE.Vector3() };
+    controls.enabled = false;
+    controls.autoRotate = false;
+    if (viewKey) {
+      activeView = viewKey;
+      toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){
+        b.classList.toggle('active', b.dataset.view === viewKey);
+      });
+    }
+  }
+
+  function goView(key) {
+    var v = VIEWS[key];
+    if (!v) return;
+    var norm = Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+    var pos = new THREE.Vector3(v.x/norm * dist, v.y/norm * dist, v.z/norm * dist);
+    animateTo(pos, new THREE.Vector3(), key);
+  }
 
   function scheduleReturn() {
     clearTimeout(idleTimer);
-    idleTimer = setTimeout(function () { if (!isInteracting) returning = true; }, 2200);
+    idleTimer = setTimeout(function () {
+      if (!isInteracting) animateTo(homePos, homeTarget, activeView);
+    }, 2500);
   }
 
   canvas.addEventListener('pointerdown', function () {
-    isInteracting = true; returning = false;
+    isInteracting = true; tweenTo = null;
     controls.enabled = true; controls.autoRotate = false;
     clearTimeout(idleTimer);
+    toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){ b.classList.remove('active'); });
   });
-  canvas.addEventListener('pointerup', function () { isInteracting = false; scheduleReturn(); });
+  canvas.addEventListener('pointerup',    function () { isInteracting = false; scheduleReturn(); });
   canvas.addEventListener('pointerleave', function () { if (!isInteracting) scheduleReturn(); });
 
-  /* SolidWorks-style warm grey material */
-  var mat = new THREE.MeshStandardMaterial({
-    color: 0x8a9198, metalness: 0.08, roughness: 0.55,
+  toolbar && toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function (btn) {
+    btn.addEventListener('click', function () { goView(btn.dataset.view); });
   });
-  var edgeMat = new THREE.LineBasicMaterial({ color: 0x1e2a35, transparent: true, opacity: 0.55 });
+  setHomeBtn && setHomeBtn.addEventListener('click', function () {
+    homePos.copy(camera.position);
+    homeTarget.copy(controls.target);
+    setHomeBtn.textContent = 'Home Set ✓';
+    setTimeout(function () { setHomeBtn.textContent = 'Set Home'; }, 1800);
+  });
+
+  /* Material — SolidWorks warm grey + edge lines */
+  var mat     = new THREE.MeshStandardMaterial({ color: 0x8a9198, metalness: 0.08, roughness: 0.55 });
+  var edgeMat = new THREE.LineBasicMaterial({ color: 0x1c2830, transparent: true, opacity: 0.5 });
 
   var loader = new THREE.OBJLoader();
   loader.load(
     'models/kiosk-brandy.obj',
     function (obj) {
+      /* ── Z-up → Y-up correction (SolidWorks exports in Z-up) ── */
+      obj.rotation.x = -Math.PI / 2;
+
       obj.traverse(function (child) {
         if (!child.isMesh) return;
         child.material = mat;
         child.castShadow = true;
         child.receiveShadow = true;
-        /* Crisp edge lines — matches SolidWorks edge display */
         var edges = new THREE.EdgesGeometry(child.geometry, 18);
-        var lines = new THREE.LineSegments(edges, edgeMat);
-        child.add(lines);
+        child.add(new THREE.LineSegments(edges, edgeMat));
       });
+
+      /* Centre model at origin */
+      obj.updateMatrixWorld(true);
       var box  = new THREE.Box3().setFromObject(obj);
       var ctr  = box.getCenter(new THREE.Vector3());
       var size = box.getSize(new THREE.Vector3());
       var maxD = Math.max(size.x, size.y, size.z);
-      obj.position.sub(ctr);
+
+      /* Offset so model sits centred */
+      obj.position.set(-ctr.x, -ctr.y, -ctr.z);
       scene.add(obj);
 
-      /* Position ground at model bottom */
-      ground.position.y = -size.y / 2;
-      key.shadow.camera.left   = -maxD * 1.5;
-      key.shadow.camera.right  =  maxD * 1.5;
-      key.shadow.camera.top    =  maxD * 1.5;
-      key.shadow.camera.bottom = -maxD * 1.5;
+      /* Recompute box after offset */
+      box.setFromObject(obj);
+      ground.position.y = box.min.y - 0.01;
+
+      key.shadow.camera.left   = -maxD * 2;
+      key.shadow.camera.right  =  maxD * 2;
+      key.shadow.camera.top    =  maxD * 2;
+      key.shadow.camera.bottom = -maxD * 2;
+      key.shadow.camera.far    = maxD * 10;
       key.shadow.camera.updateProjectionMatrix();
 
-      /* Isometric-style camera angle matching SolidWorks view */
-      var dist = (maxD / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.55;
-      camera.position.set(dist * 0.65, dist * 0.45, dist * 0.75);
+      dist = (maxD / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.6;
+      controls.minDistance = maxD * 0.35;
+      controls.maxDistance = maxD * 5;
+
+      /* Set default isometric view */
+      var iv = VIEWS.iso;
+      var n  = Math.sqrt(iv.x*iv.x + iv.y*iv.y + iv.z*iv.z);
+      camera.position.set(iv.x/n*dist, iv.y/n*dist, iv.z/n*dist);
       camera.lookAt(0, 0, 0);
       controls.target.set(0, 0, 0);
-      controls.minDistance = maxD * 0.4;
-      controls.maxDistance = maxD * 5;
       controls.update();
 
-      // Save home state for snap-back
       homePos.copy(camera.position);
-      homeTarget.copy(controls.target);
+      homeTarget.set(0, 0, 0);
 
       loading.classList.add('done');
       hint.classList.add('show');
+      toolbar.classList.add('show');
       requestAnimationFrame(tick);
     },
     function (xhr) {
       var txt = loading.querySelector('.viewer-loading-text');
       if (!txt) return;
-      if (xhr.total) {
-        txt.textContent = 'Loading — ' + Math.round((xhr.loaded / xhr.total) * 100) + '%';
-      } else {
-        txt.textContent = 'Loading — ' + (xhr.loaded / 1048576).toFixed(1) + ' MB';
-      }
+      txt.textContent = xhr.total
+        ? 'Loading — ' + Math.round((xhr.loaded / xhr.total) * 100) + '%'
+        : 'Loading — ' + (xhr.loaded / 1048576).toFixed(1) + ' MB';
     },
     function (err) { console.error('OBJ load error:', err); }
   );
@@ -1322,20 +1418,20 @@
   function tick() {
     requestAnimationFrame(tick);
 
-    if (returning) {
-      // Smoothly lerp camera and target back to home
-      controls.enabled = false;
-      camera.position.lerp(homePos, 0.045);
-      controls.target.lerp(homeTarget, 0.045);
+    if (tweenTo) {
+      camera.position.lerp(tweenTo.pos, 0.06);
+      controls.target.lerp(tweenTo.target, 0.06);
       camera.lookAt(controls.target);
 
-      if (camera.position.distanceTo(homePos) < 0.005 && controls.target.distanceTo(homeTarget) < 0.005) {
-        camera.position.copy(homePos);
-        controls.target.copy(homeTarget);
-        camera.lookAt(homeTarget);
-        returning = false;
+      var posClose    = camera.position.distanceTo(tweenTo.pos) < 0.005;
+      var targetClose = controls.target.distanceTo(tweenTo.target) < 0.005;
+      if (posClose && targetClose) {
+        camera.position.copy(tweenTo.pos);
+        controls.target.copy(tweenTo.target);
+        camera.lookAt(controls.target);
+        tweenTo = null;
         controls.enabled = true;
-        controls.autoRotate = true;
+        controls.autoRotate = (activeView === 'iso');
         controls.update();
       }
     } else {
@@ -1348,7 +1444,8 @@
   window.addEventListener('resize', function () {
     var w = wrap.clientWidth, h = wrap.clientHeight;
     if (!w || !h) return;
-    camera.aspect = w / h; camera.updateProjectionMatrix();
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
     renderer.setSize(w, h);
   }, { passive: true });
 })();
