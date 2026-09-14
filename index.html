@@ -404,6 +404,44 @@
     }
     .viewer-hint.show { opacity: 1; }
 
+    /* Environment swatches */
+    .viewer-envs {
+      position: absolute;
+      bottom: 14px; right: 14px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      z-index: 4;
+      opacity: 0;
+      transition: opacity 0.4s ease 0.5s;
+    }
+    .viewer-envs.show { opacity: 1; }
+    .env-label {
+      font-family: var(--mono);
+      font-size: 8px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      background: rgba(255,255,255,0.75);
+      padding: 2px 7px;
+      border-radius: 100px;
+      backdrop-filter: blur(6px);
+    }
+    .env-swatch {
+      width: 17px; height: 17px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid rgba(255,255,255,0.55);
+      box-shadow: 0 1px 5px rgba(0,0,0,0.18);
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      padding: 0;
+    }
+    .env-swatch:hover { transform: scale(1.25); }
+    .env-swatch.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(0,87,200,0.35), 0 1px 5px rgba(0,0,0,0.18);
+    }
+
     /* Model switcher strip */
     .viewer-switcher {
       position: absolute;
@@ -895,7 +933,14 @@
           <span class="viewer-loading-text">Loading 3D Model</span>
         </div>
         <span class="viewer-badge">Interactive 3D · Fusion 360</span>
-        <span class="viewer-hint" id="kiosk-hint">Drag to rotate</span>
+        <div class="viewer-envs" id="kiosk-envs">
+          <span class="env-label">Scene</span>
+          <button class="env-swatch active" data-env="studio"    style="background:#f0f3f8" title="Studio"></button>
+          <button class="env-swatch"        data-env="white"     style="background:#ffffff" title="White"></button>
+          <button class="env-swatch"        data-env="dark"      style="background:#111620" title="Dark"></button>
+          <button class="env-swatch"        data-env="blueprint" style="background:#071428" title="Blueprint"></button>
+          <button class="env-swatch"        data-env="warm"      style="background:#f5f0e8" title="Warm"></button>
+        </div>
         <div class="viewer-switcher" id="kiosk-switcher">
           <button class="vs-btn active" data-idx="0">1 Hopper</button>
           <button class="vs-btn" data-idx="1">2 Hopper</button>
@@ -1266,9 +1311,9 @@
   var canvas    = document.getElementById('kiosk-viewer');
   var loading   = document.getElementById('kiosk-loading');
   var loadTxt   = loading.querySelector('.viewer-loading-text');
-  var hint      = document.getElementById('kiosk-hint');
   var toolbar   = document.getElementById('kiosk-toolbar');
   var switcher  = document.getElementById('kiosk-switcher');
+  var envsEl    = document.getElementById('kiosk-envs');
   var titleEl   = document.getElementById('kiosk-model-title');
   if (!canvas || !window.THREE) return;
   var THREE = window.THREE;
@@ -1300,7 +1345,8 @@
   scene.background = new THREE.Color(0xf0f3f8);
   var camera = new THREE.PerspectiveCamera(38, W / H, 0.01, 5000);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  var ambLight = new THREE.AmbientLight(0xffffff, 0.55);
+  scene.add(ambLight);
   var key = new THREE.DirectionalLight(0xffffff, 1.1);
   key.position.set(5, 10, 7); key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
@@ -1310,9 +1356,36 @@
   var top3 = new THREE.DirectionalLight(0xffffff, 0.2);
   top3.position.set(0, 10, 0); scene.add(top3);
 
-  var ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.ShadowMaterial({ opacity: 0.10 }));
-  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
-  scene.add(ground);
+  var groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.ShadowMaterial({ opacity: 0.10 }));
+  groundMesh.rotation.x = -Math.PI / 2; groundMesh.receiveShadow = true;
+  scene.add(groundMesh);
+
+  /* ── Environment presets ── */
+  var ENVS = {
+    studio:    { bg: 0xf0f3f8, amb: [0xffffff, 0.55], key: [0xffffff, 1.1], fill: [0xe8eeff, 0.40], top: [0xffffff, 0.20], shadow: 0.10 },
+    white:     { bg: 0xffffff, amb: [0xffffff, 0.70], key: [0xfff8f0, 1.05], fill: [0xeef2ff, 0.35], top: [0xffffff, 0.25], shadow: 0.08 },
+    dark:      { bg: 0x111620, amb: [0x202840, 0.40], key: [0xfff0d0, 1.40], fill: [0x3060a0, 0.55], top: [0x101828, 0.15], shadow: 0.20 },
+    blueprint: { bg: 0x071428, amb: [0x081830, 0.45], key: [0x70a8ff, 1.30], fill: [0x0057c8, 0.65], top: [0x0a2060, 0.25], shadow: 0.18 },
+    warm:      { bg: 0xf5f0e8, amb: [0xfff8e8, 0.55], key: [0xffd878, 1.10], fill: [0xffe8a8, 0.35], top: [0xffeedd, 0.20], shadow: 0.10 },
+  };
+
+  function setEnv(key_name) {
+    var e = ENVS[key_name]; if (!e) return;
+    scene.background.set(e.bg);
+    renderer.setClearColor(e.bg, 1);
+    ambLight.color.set(e.amb[0]); ambLight.intensity = e.amb[1];
+    key.color.set(e.key[0]);      key.intensity       = e.key[1];
+    fill.color.set(e.fill[0]);    fill.intensity      = e.fill[1];
+    top3.color.set(e.top[0]);     top3.intensity      = e.top[1];
+    groundMesh.material.opacity = e.shadow;
+    envsEl && envsEl.querySelectorAll('.env-swatch').forEach(function(b){
+      b.classList.toggle('active', b.dataset.env === key_name);
+    });
+  }
+
+  envsEl && envsEl.querySelectorAll('.env-swatch').forEach(function(btn) {
+    btn.addEventListener('click', function() { setEnv(btn.dataset.env); });
+  });
 
   var controls = new THREE.OrbitControls(camera, canvas);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
@@ -1401,7 +1474,7 @@
         currentGroup = obj;
 
         box.setFromObject(obj);
-        ground.position.y = box.min.y - 0.01;
+        groundMesh.position.y = box.min.y - 0.01;
         key.shadow.camera.left   = -maxD * 2; key.shadow.camera.right  = maxD * 2;
         key.shadow.camera.top    =  maxD * 2; key.shadow.camera.bottom = -maxD * 2;
         key.shadow.camera.far    =  maxD * 10;
@@ -1418,9 +1491,9 @@
         currentIdx = idx;
         isLoading  = false;
         showLoading(false);
-        hint.classList.add('show');
         toolbar.classList.add('show');
         switcher.classList.add('show');
+        if (envsEl) envsEl.classList.add('show');
       },
       function (xhr) {
         loadTxt.textContent = xhr.total
