@@ -1195,27 +1195,39 @@
   var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(W, H);
-  renderer.setClearColor(0xf2f5fb, 1);
+  renderer.setClearColor(0xf0f3f8, 1);
   renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
+  renderer.toneMapping = THREE.LinearToneMapping;
+  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   var scene  = new THREE.Scene();
-  scene.background = new THREE.Color(0xf2f5fb);
-  var camera = new THREE.PerspectiveCamera(42, W / H, 0.01, 5000);
+  scene.background = new THREE.Color(0xf0f3f8);
+  var camera = new THREE.PerspectiveCamera(38, W / H, 0.01, 5000);
 
-  /* Lights tuned for light background */
-  scene.add(new THREE.AmbientLight(0xd8e4f8, 0.6));
-  var key = new THREE.DirectionalLight(0xffffff, 1.4);
-  key.position.set(4, 8, 5); key.castShadow = true;
+  /* Lighting matched to SolidWorks default studio look */
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  var key = new THREE.DirectionalLight(0xffffff, 1.1);
+  key.position.set(5, 10, 7);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.near = 0.5;
+  key.shadow.camera.far = 5000;
   scene.add(key);
-  var fill = new THREE.DirectionalLight(0x8aabdd, 0.45);
-  fill.position.set(-5, 2, -4);
+  var fill = new THREE.DirectionalLight(0xe8eeff, 0.4);
+  fill.position.set(-6, 4, -3);
   scene.add(fill);
-  var rim = new THREE.DirectionalLight(0x0057c8, 0.3);
-  rim.position.set(0, -4, -6);
-  scene.add(rim);
+  var top = new THREE.DirectionalLight(0xffffff, 0.25);
+  top.position.set(0, 10, 0);
+  scene.add(top);
+
+  /* Ground plane for shadow */
+  var groundMat = new THREE.ShadowMaterial({ opacity: 0.12 });
+  var ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
 
   var controls = new THREE.OrbitControls(camera, canvas);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
@@ -1243,15 +1255,25 @@
   canvas.addEventListener('pointerup', function () { isInteracting = false; scheduleReturn(); });
   canvas.addEventListener('pointerleave', function () { if (!isInteracting) scheduleReturn(); });
 
-  /* Steel material — dark blue-grey reads well on light bg */
-  var mat = new THREE.MeshStandardMaterial({ color: 0x3a5070, metalness: 0.75, roughness: 0.25 });
+  /* SolidWorks-style warm grey material */
+  var mat = new THREE.MeshStandardMaterial({
+    color: 0x8a9198, metalness: 0.08, roughness: 0.55,
+  });
+  var edgeMat = new THREE.LineBasicMaterial({ color: 0x1e2a35, transparent: true, opacity: 0.55 });
 
   var loader = new THREE.OBJLoader();
   loader.load(
     'models/kiosk-brandy.obj',
     function (obj) {
       obj.traverse(function (child) {
-        if (child.isMesh) { child.material = mat; child.castShadow = true; child.receiveShadow = true; }
+        if (!child.isMesh) return;
+        child.material = mat;
+        child.castShadow = true;
+        child.receiveShadow = true;
+        /* Crisp edge lines — matches SolidWorks edge display */
+        var edges = new THREE.EdgesGeometry(child.geometry, 18);
+        var lines = new THREE.LineSegments(edges, edgeMat);
+        child.add(lines);
       });
       var box  = new THREE.Box3().setFromObject(obj);
       var ctr  = box.getCenter(new THREE.Vector3());
@@ -1260,12 +1282,21 @@
       obj.position.sub(ctr);
       scene.add(obj);
 
-      var dist = (maxD / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.6;
-      camera.position.set(dist * 0.55, dist * 0.3, dist * 0.85);
+      /* Position ground at model bottom */
+      ground.position.y = -size.y / 2;
+      key.shadow.camera.left   = -maxD * 1.5;
+      key.shadow.camera.right  =  maxD * 1.5;
+      key.shadow.camera.top    =  maxD * 1.5;
+      key.shadow.camera.bottom = -maxD * 1.5;
+      key.shadow.camera.updateProjectionMatrix();
+
+      /* Isometric-style camera angle matching SolidWorks view */
+      var dist = (maxD / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.55;
+      camera.position.set(dist * 0.65, dist * 0.45, dist * 0.75);
       camera.lookAt(0, 0, 0);
       controls.target.set(0, 0, 0);
       controls.minDistance = maxD * 0.4;
-      controls.maxDistance = maxD * 6;
+      controls.maxDistance = maxD * 5;
       controls.update();
 
       // Save home state for snap-back
