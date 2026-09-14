@@ -874,8 +874,6 @@
             <button class="vt-btn" data-view="top">Top</button>
             <button class="vt-btn" data-view="back">Back</button>
           </div>
-          <div class="vt-sep"></div>
-          <button class="vt-btn vt-btn-home" id="kiosk-set-home">Set Home</button>
         </div>
       </div>
       <div class="featured-info">
@@ -1233,7 +1231,6 @@
   var loading  = document.getElementById('kiosk-loading');
   var hint     = document.getElementById('kiosk-hint');
   var toolbar  = document.getElementById('kiosk-toolbar');
-  var setHomeBtn = document.getElementById('kiosk-set-home');
   if (!canvas || !window.THREE) return;
   var THREE = window.THREE;
 
@@ -1291,13 +1288,9 @@
   };
   var dist = 100; // updated after model loads
 
-  /* Home pos stored as the current active view on load */
-  var homePos    = new THREE.Vector3();
-  var homeTarget = new THREE.Vector3();
-  var tweenTo    = null; // { pos, target } while animating
+  var tweenTo       = null;
   var isInteracting = false;
-  var idleTimer = null;
-  var activeView = 'iso';
+  var activeView    = 'iso';
 
   function animateTo(pos, target, viewKey) {
     tweenTo = { pos: pos.clone(), target: target ? target.clone() : new THREE.Vector3() };
@@ -1319,30 +1312,15 @@
     animateTo(pos, new THREE.Vector3(), key);
   }
 
-  function scheduleReturn() {
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(function () {
-      if (!isInteracting) animateTo(homePos, homeTarget, activeView);
-    }, 2500);
-  }
-
   canvas.addEventListener('pointerdown', function () {
     isInteracting = true; tweenTo = null;
     controls.enabled = true; controls.autoRotate = false;
-    clearTimeout(idleTimer);
     toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function(b){ b.classList.remove('active'); });
   });
-  canvas.addEventListener('pointerup',    function () { isInteracting = false; scheduleReturn(); });
-  canvas.addEventListener('pointerleave', function () { if (!isInteracting) scheduleReturn(); });
+  canvas.addEventListener('pointerup', function () { isInteracting = false; });
 
   toolbar && toolbar.querySelectorAll('.vt-btn[data-view]').forEach(function (btn) {
     btn.addEventListener('click', function () { goView(btn.dataset.view); });
-  });
-  setHomeBtn && setHomeBtn.addEventListener('click', function () {
-    homePos.copy(camera.position);
-    homeTarget.copy(controls.target);
-    setHomeBtn.textContent = 'Home Set ✓';
-    setTimeout(function () { setHomeBtn.textContent = 'Set Home'; }, 1800);
   });
 
   /* Material — SolidWorks warm grey + edge lines */
@@ -1395,9 +1373,6 @@
       camera.lookAt(0, 0, 0);
       controls.target.set(0, 0, 0);
       controls.update();
-
-      homePos.copy(camera.position);
-      homeTarget.set(0, 0, 0);
 
       loading.classList.add('done');
       hint.classList.add('show');
